@@ -198,6 +198,6 @@ Legacy prototypes (`final_crowd`, `final_face_detection`, `final_weapon`) remain
 - `SETUP_GUIDE.md` – screenshot-rich installation and troubleshooting steps.
 - `MIGRATION_GUIDE.md` – explains how the three standalone models were unified.
 - `TESTING_GUIDE.md` – manual QA checklist for viva/demo sign-off.
-- `report_extract.txt` – searchable excerpt of “IP Project report.pdf” to align README claims with the official document.
 
-With this README and the referenced guides, evaluators can see the societal need, the engineered response, and the concrete steps required to run, extend, and defend the project.
+
+
