@@ -153,7 +153,7 @@ Document any additional guidelines inside `PROJECT_SUMMARY.md` or `SETUP_GUIDE.m
 
 ---
 
-## 11. Repository Map (Push Only This Folder)
+## 11. Repository Map 
 
 ```
 integrated_surveillance/
