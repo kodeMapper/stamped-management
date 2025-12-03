@@ -3,8 +3,6 @@
 
 > Real-time situational awareness through unified crowd analytics, face recognition, and weapon detection – delivered inside a single Flask dashboard.
 
-This workspace hosts every iteration of the project. The actively maintained application lives inside `integrated_surveillance/`; the other `final_*` folders are legacy modules retained for reference only. Push **only** the `integrated_surveillance` directory to GitHub.
-
 ---
 
 ## 1. Solution Highlights
