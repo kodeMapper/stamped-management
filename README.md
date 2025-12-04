@@ -162,6 +162,8 @@ integrated_surveillance/
 ├─ start.bat / start.ps1     # Entry points for operators
 ├─ RUN_APP.bat               # Automation script (venv + install + run)
 ├─ flowchart.png             # Diagram referenced in the Architecture section
+├─ render.yaml               # Render Blueprint for one-click backend deploy
+├─ Procfile                  # gunicorn start command for Render / production
 ├─ models/
 │   ├─ crowd_detection.py
 │   ├─ face_recognition_module.py
@@ -174,6 +176,12 @@ integrated_surveillance/
 ├─ static/
 │   ├─ css/
 │   └─ js/
+├─ frontend/                 # Next.js UI for Vercel deployments
+│   ├─ pages/
+│   ├─ components/
+│   ├─ styles/
+│   ├─ package.json
+│   └─ .env.example
 ├─ PROJECT_SUMMARY.md / SETUP_GUIDE.md / MIGRATION_GUIDE.md
 └─ report_extract.txt        # Text dump from the official project report
 ```
@@ -200,15 +208,19 @@ Legacy prototypes (`final_crowd`, `final_face_detection`, `final_weapon`) remain
 ## 14. Deployment Workflow (Render + Vercel)
 
 - **Backend (Render)**
-   - Repo already contains a `Procfile` (`web: gunicorn app:app`) and `requirements.txt` with `gunicorn` + `Flask-Cors` for production.
-   - Provision a Render Web Service → select this repo (or the `integrated_surveillance` folder) → Build Command `pip install -r requirements.txt` → Start Command `gunicorn app:app`.
-   - Set environment variables: `FLASK_SECRET_KEY`, `ADMIN_USERNAME`/`ADMIN_PASSWORD`, `OPERATOR_USERNAME`/`OPERATOR_PASSWORD`, `CAMERA_SOURCES` (comma-separated `name=rtsp://...`), `DISABLE_CAMERA_MANAGER=true` if you plan to plug in video later, and optional `CORS_ORIGINS=https://your-vercel-app.vercel.app`.
-   - Render exposes a public URL such as `https://smart-surveillance.onrender.com`; keep this for the frontend.
+   - Use the included `render.yaml` or manual configuration. The blueprint points at `integrated_surveillance`, runs `pip install -r requirements.txt`, and starts Gunicorn via `Procfile`.
+   - Environment variables to set inside Render:
+      - `FLASK_SECRET_KEY` (random string)
+      - `ADMIN_USERNAME`/`ADMIN_PASSWORD`, `OPERATOR_USERNAME`/`OPERATOR_PASSWORD`
+      - `CAMERA_SOURCES` (comma-separated `label=rtsp://...` or numeric indexes)
+      - `DISABLE_CAMERA_MANAGER=true` for cloud demos without cameras
+      - `CORS_ORIGINS=https://your-vercel-app.vercel.app`
+   - Deploy, note the public HTTPS URL (for example `https://smart-surveillance.onrender.com`), and update Vercel with it.
 
 - **Frontend (Vercel)**
-   - Move the Flask templates/JS into a dedicated frontend (Next.js or static). When fetching data or embedding MJPEG streams, reference `process.env.NEXT_PUBLIC_API_BASE`.
-   - In Vercel Project Settings, define `NEXT_PUBLIC_API_BASE=https://smart-surveillance.onrender.com` (or custom domain) so the browser calls the Render backend directly.
-   - For protected streams, keep the Flask login form or add JWT-based APIs before exposing to the public.
+   - The `frontend/` Next.js app is ready for deployment. From that folder, run `npm install` followed by `npm run dev` for local testing.
+   - Push the repo, create a new Vercel project with `integrated_surveillance/frontend` as the root, and set `NEXT_PUBLIC_API_BASE` in the Vercel dashboard to the Render URL.
+   - Build command: `npm run build`; Output: `.next` (handled automatically). Vercel serves the static React UI which calls the Render API directly.
 
 - **Environment Variables Recap**
    - `FLASK_SECRET_KEY` – cryptographically secure string for sessions.
