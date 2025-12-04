@@ -202,34 +202,53 @@ Legacy prototypes (`final_crowd`, `final_face_detection`, `final_weapon`) remain
 
 ## 13. Supporting Documentation
 
+- `PROJECT_SUMMARY.md` – quick reference for value proposition, stakeholder mapping, and backlog.
+- `SETUP_GUIDE.md` – screenshot-rich instructions for local installation, credential reset, and troubleshooting.
+- `MIGRATION_GUIDE.md` – explains how the standalone crowd, face, and weapon prototypes were merged into this monorepo.
+- `TESTING_GUIDE.md` – manual QA matrix covering camera health, module toggles, and regression checks.
+- `report_extract.txt` – searchable dump of the official project report (“Stampede Management System: A Real-Time Analytics Platform”).
 
 ---
 
 ## 14. Deployment Workflow (Render + Vercel)
 
-- **Backend (Render)**
-   - Use the included `render.yaml` or manual configuration. The blueprint points at `integrated_surveillance`, runs `pip install -r requirements.txt`, and starts Gunicorn via `Procfile`.
-   - Environment variables to set inside Render:
-      - `FLASK_SECRET_KEY` (random string)
-      - `ADMIN_USERNAME`/`ADMIN_PASSWORD`, `OPERATOR_USERNAME`/`OPERATOR_PASSWORD`
-      - `CAMERA_SOURCES` (comma-separated `label=rtsp://...` or numeric indexes)
-      - `DISABLE_CAMERA_MANAGER=true` for cloud demos without cameras
-      - `CORS_ORIGINS=https://your-vercel-app.vercel.app`
-   - Deploy, note the public HTTPS URL (for example `https://smart-surveillance.onrender.com`), and update Vercel with it.
+### Backend on Render (Flask + YOLO)
+1. **Prerequisites** – GitHub repo pushed, Render account ready, and (optional) payment method if you plan to use >512 MB instances.
+2. **Create service** – In Render click **New → Blueprint** and supply the repo URL. Render detects `render.yaml` inside `integrated_surveillance/` and suggests a web service called `integrated-surveillance-api`.
+3. **Select instance size** – Free instances have only 512 MB (tight for Torch). If you see “Ran out of memory” later, switch to Starter/Standard in **Settings → Instance Type**.
+4. **Configure environment variables** (Settings → Environment):
+   - `FLASK_SECRET_KEY` – random 32+ char string.
+   - `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `OPERATOR_USERNAME`, `OPERATOR_PASSWORD` – credentials for the Flask login page.
+   - `CAMERA_SOURCES` – keep blank for USB cameras 0/1, or set `lobby=0,gate=rtsp://user:pass@ip/stream`.
+   - `DISABLE_CAMERA_MANAGER` – `true` while testing without physical cameras; flip to `false` when feeds exist.
+   - `CORS_ORIGINS` – comma-separated list of domains allowed to call the API (e.g., `https://your-vercel-app.vercel.app`).
+5. **Deploy** – Click **Deploy Blueprint**. Render runs `pip install -r requirements.txt` followed by `gunicorn app:app`. When status shows **Live**, copy the public URL (e.g., `https://integrated-surveillance-api.onrender.com`).
+6. **Smoke test** – From your terminal: `curl https://<render-url>/status`. You should see JSON with `cameras`, `crowd`, etc. Visit `/login` in a browser to confirm the dashboard loads.
+7. **Iterate** – When you push new commits, Render redeploys automatically. For immediate redeploys, click **Manual Deploy → Deploy latest commit**.
 
-- **Frontend (Vercel)**
-   - The `frontend/` Next.js app is ready for deployment. From that folder, run `npm install` followed by `npm run dev` for local testing.
-   - Push the repo, create a new Vercel project with `integrated_surveillance/frontend` as the root, and set `NEXT_PUBLIC_API_BASE` in the Vercel dashboard to the Render URL.
-   - Build command: `npm run build`; Output: `.next` (handled automatically). Vercel serves the static React UI which calls the Render API directly.
+### Frontend on Vercel (Next.js dashboard)
+1. **Local preview (optional)** – `cd integrated_surveillance/frontend`, run `npm install`, then `npm run dev`. Set `NEXT_PUBLIC_API_BASE=http://localhost:5000` (default) if running the backend locally.
+2. **Push code** – Ensure the `frontend/` folder is committed to `main` so Vercel can import it.
+3. **Create project** – In Vercel, choose **Add New → Project**, import the same GitHub repo, and set the project root to `integrated_surveillance/frontend`.
+4. **Configure env var** – Add `NEXT_PUBLIC_API_BASE` with the Render URL you copied earlier. Vercel exposes it to the React app at build/runtime.
+5. **Deploy** – Accept the default build command (`npm run build`) and click **Deploy**. Once finished you get a domain like `https://surveillance-dashboard.vercel.app`.
+6. **Verify connectivity** – Open the Vercel URL; the hero section shows the API base. Status cards should populate (or display connection errors if CORS isn’t configured yet).
 
-- **Environment Variables Recap**
-   - `FLASK_SECRET_KEY` – cryptographically secure string for sessions.
-   - `ADMIN_USERNAME`/`ADMIN_PASSWORD`, `OPERATOR_USERNAME`/`OPERATOR_PASSWORD` – override default logins.
-   - `CAMERA_SOURCES` – comma-separated list like `lobby=0,gate=rtsp://10.0.0.20:554/stream1`; leaving it empty falls back to USB cams 0 & 1.
-   - `DISABLE_CAMERA_MANAGER` – set to `true` on cloud deployments when no cameras are attached yet.
-   - `CORS_ORIGINS` – comma-separated list of allowed front-end origins (`*` by default).
+### Wire the Two Tiers Together
+1. Update `CORS_ORIGINS` on Render to include the final Vercel domain and redeploy the backend.
+2. Refresh the Vercel site; `/status` requests now succeed, and MJPEG `<img>` elements stream from Render.
+3. For secure demos change the default passwords in Render’s environment variables and redeploy.
 
-Deploy sequence: push main → Render builds backend → copy Render URL into Vercel env → Vercel rebuilds frontend. This keeps MJPEG/REST traffic on Render while Vercel serves the operator UI close to end users.
+### Environment Variable Reference
+- `FLASK_SECRET_KEY` – required for Flask session signing.
+- `ADMIN_USERNAME`/`ADMIN_PASSWORD` – credentials for admin portal.
+- `OPERATOR_USERNAME`/`OPERATOR_PASSWORD` – lower-privileged login.
+- `CAMERA_SOURCES` – `name=rtsp://` or numeric indexes separated by commas. Example: `lobby=rtsp://10.0.0.5/live,0`.
+- `DISABLE_CAMERA_MANAGER` – `true` to skip camera initialization (prevents crashes on servers without devices).
+- `CORS_ORIGINS` – allowlist for frontends (use `*` only in private testing environments).
+- `NEXT_PUBLIC_API_BASE` (Vercel) – Render base URL consumed by the Next.js UI.
+
+Deploy sequence recap: push `main` → Render builds backend (ensure env vars + memory) → copy Render URL → set `NEXT_PUBLIC_API_BASE` in Vercel → deploy frontend → update `CORS_ORIGINS` on Render → redeploy backend → verify `/status` + MJPEG feeds in the Vercel UI.
 
 
 
