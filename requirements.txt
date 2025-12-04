@@ -3,6 +3,7 @@
 # Core Framework
 Flask>=2.3.0
 Flask-Login>=0.6.2
+Flask-Cors>=4.0.0
 
 # Computer Vision
 opencv-contrib-python>=4.8.0
@@ -20,3 +21,4 @@ ultralytics>=8.0.0
 
 # Additional utilities
 Pillow>=10.0.0
+gunicorn>=21.2.0

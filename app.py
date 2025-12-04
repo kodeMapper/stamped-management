@@ -2,8 +2,10 @@
 Integrated Surveillance System
 Combines crowd detection, face recognition, and weapon detection
 """
+import os
 from flask import Flask, render_template, Response, request, jsonify, redirect, url_for, flash, session
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from flask_cors import CORS
 import cv2
 import numpy as np
 import time
@@ -22,18 +24,33 @@ from models.weapon_detection import WeaponDetector
 
 # Initialize Flask app
 app = Flask(__name__)
-app.secret_key = 'integrated_surveillance_secret_key_2025'
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'integrated_surveillance_secret_key_2025')
+
+# Enable CORS so hosted front-ends (e.g., Vercel) can call the API
+allowed_origins = os.getenv('CORS_ORIGINS', '*').strip()
+if not allowed_origins or allowed_origins == '*':
+    CORS(app, supports_credentials=True)
+else:
+    origins = [origin.strip() for origin in allowed_origins.split(',') if origin.strip()]
+    CORS(app, resources={r"/*": {"origins": origins}}, supports_credentials=True)
 
 # Flask-Login setup
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-# Simple user database
-users = {
-    "admin": {"password": "admin123"},
-    "operator": {"password": "operator123"}
-}
+# Simple user database (override via environment variables for deployments)
+users = {}
+
+admin_username = os.getenv('ADMIN_USERNAME', 'admin')
+admin_password = os.getenv('ADMIN_PASSWORD', 'admin123')
+operator_username = os.getenv('OPERATOR_USERNAME', 'operator')
+operator_password = os.getenv('OPERATOR_PASSWORD', 'operator123')
+
+if admin_username:
+    users[admin_username] = {"password": admin_password}
+if operator_username:
+    users[operator_username] = {"password": operator_password}
 
 class User(UserMixin):
     def __init__(self, id):
@@ -281,8 +298,10 @@ def status():
         'weapon': {}
     }
     
+    active_camera_ids = list(camera_manager.cameras.keys()) or [0, 1]
+    
     # Camera status
-    for cam_id in [0, 1]:
+    for cam_id in active_camera_ids:
         camera = camera_manager.get_camera(cam_id)
         if camera:
             status_data['cameras'][cam_id] = {
@@ -292,7 +311,7 @@ def status():
             }
     
     # Crowd detection status
-    for cam_id in [0, 1]:
+    for cam_id in active_camera_ids:
         count = crowd_detector.get_count(cam_id)
         status_data['crowd'][cam_id] = {
             'count': count,
@@ -347,11 +366,21 @@ def update_settings():
 
 @app.before_request
 def initialize_cameras():
-    """Initialize cameras before first request"""
-    if not hasattr(initialize_cameras, 'done'):
-        print("[App] Initializing cameras...")
-        camera_manager.initialize_default_cameras()
+    """Initialize cameras before first request or skip if disabled."""
+    if getattr(initialize_cameras, 'done', False):
+        return
+    disable_manager = os.getenv('DISABLE_CAMERA_MANAGER', 'false').lower() in {'1', 'true', 'yes'}
+    if disable_manager:
+        print("[App] Camera manager disabled via DISABLE_CAMERA_MANAGER")
         initialize_cameras.done = True
+        return
+    print("[App] Initializing cameras...")
+    camera_sources = os.getenv('CAMERA_SOURCES', '').strip()
+    if camera_sources:
+        camera_manager.initialize_from_sources(camera_sources)
+    else:
+        camera_manager.initialize_default_cameras()
+    initialize_cameras.done = True
 
 
 # ============================================================================
@@ -363,9 +392,11 @@ if __name__ == '__main__':
     print("INTEGRATED SURVEILLANCE SYSTEM")
     print("=" * 60)
     print("Starting server...")
-    print("Default login credentials:")
-    print("  Username: admin")
-    print("  Password: admin123")
+    print("Configured users:")
+    for username in users:
+        print(f"  Username: {username}")
     print("=" * 60)
     
-    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True, use_reloader=False)
+    port = int(os.getenv('PORT', 5000))
+    debug_mode = os.getenv('FLASK_DEBUG', 'false').lower() in {'1', 'true', 'yes'}
+    app.run(host='0.0.0.0', port=port, debug=debug_mode, threaded=True, use_reloader=False)

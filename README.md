@@ -194,10 +194,30 @@ Legacy prototypes (`final_crowd`, `final_face_detection`, `final_weapon`) remain
 
 ## 13. Supporting Documentation
 
-- `PROJECT_SUMMARY.md` – elevator pitches, differentiators, backlog items.
-- `SETUP_GUIDE.md` – screenshot-rich installation and troubleshooting steps.
-- `MIGRATION_GUIDE.md` – explains how the three standalone models were unified.
-- `TESTING_GUIDE.md` – manual QA checklist for viva/demo sign-off.
+
+---
+
+## 14. Deployment Workflow (Render + Vercel)
+
+- **Backend (Render)**
+   - Repo already contains a `Procfile` (`web: gunicorn app:app`) and `requirements.txt` with `gunicorn` + `Flask-Cors` for production.
+   - Provision a Render Web Service → select this repo (or the `integrated_surveillance` folder) → Build Command `pip install -r requirements.txt` → Start Command `gunicorn app:app`.
+   - Set environment variables: `FLASK_SECRET_KEY`, `ADMIN_USERNAME`/`ADMIN_PASSWORD`, `OPERATOR_USERNAME`/`OPERATOR_PASSWORD`, `CAMERA_SOURCES` (comma-separated `name=rtsp://...`), `DISABLE_CAMERA_MANAGER=true` if you plan to plug in video later, and optional `CORS_ORIGINS=https://your-vercel-app.vercel.app`.
+   - Render exposes a public URL such as `https://smart-surveillance.onrender.com`; keep this for the frontend.
+
+- **Frontend (Vercel)**
+   - Move the Flask templates/JS into a dedicated frontend (Next.js or static). When fetching data or embedding MJPEG streams, reference `process.env.NEXT_PUBLIC_API_BASE`.
+   - In Vercel Project Settings, define `NEXT_PUBLIC_API_BASE=https://smart-surveillance.onrender.com` (or custom domain) so the browser calls the Render backend directly.
+   - For protected streams, keep the Flask login form or add JWT-based APIs before exposing to the public.
+
+- **Environment Variables Recap**
+   - `FLASK_SECRET_KEY` – cryptographically secure string for sessions.
+   - `ADMIN_USERNAME`/`ADMIN_PASSWORD`, `OPERATOR_USERNAME`/`OPERATOR_PASSWORD` – override default logins.
+   - `CAMERA_SOURCES` – comma-separated list like `lobby=0,gate=rtsp://10.0.0.20:554/stream1`; leaving it empty falls back to USB cams 0 & 1.
+   - `DISABLE_CAMERA_MANAGER` – set to `true` on cloud deployments when no cameras are attached yet.
+   - `CORS_ORIGINS` – comma-separated list of allowed front-end origins (`*` by default).
+
+Deploy sequence: push main → Render builds backend → copy Render URL into Vercel env → Vercel rebuilds frontend. This keeps MJPEG/REST traffic on Render while Vercel serves the operator UI close to end users.
 
 
 

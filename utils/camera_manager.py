@@ -6,23 +6,52 @@ import cv2
 import numpy as np
 from threading import Thread, Lock
 import time
-from typing import Optional, Dict, Callable
+from typing import Optional, Dict, Union
 
 
 class CameraStream:
     """Manages a single camera stream with thread-safe frame access"""
     
-    def __init__(self, camera_id: int, name: str, width: int = 640, height: int = 480):
+    def __init__(self, camera_id: int, name: str, width: int = 640, height: int = 480,
+                 source: Optional[Union[int, str]] = None):
         self.camera_id = camera_id
         self.name = name
         self.width = width
         self.height = height
+        self.source: Union[int, str] = camera_id if source is None else source
         self.cap: Optional[cv2.VideoCapture] = None
         self.frame: Optional[np.ndarray] = None
         self.running = False
         self.thread: Optional[Thread] = None
         self.lock = Lock()
         self.last_update = 0
+    
+    def _open_capture(self) -> bool:
+        """Open the capture device or stream based on source type."""
+        source = self.source
+        backend_source: Union[int, str] = source
+        if isinstance(source, str):
+            # Attempt numeric conversion for USB indexes provided as strings
+            try:
+                backend_source = int(source)
+            except ValueError:
+                backend_source = source.strip()
+        
+        if isinstance(backend_source, int):
+            self.cap = cv2.VideoCapture(backend_source, cv2.CAP_DSHOW)
+            if not self.cap.isOpened():
+                self.cap = cv2.VideoCapture(backend_source)
+        else:
+            self.cap = cv2.VideoCapture(backend_source)
+        
+        if not self.cap or not self.cap.isOpened():
+            return False
+        
+        # Apply resolution hints where possible
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        return True
         
     def start(self) -> bool:
         """Start the camera stream"""
@@ -30,20 +59,9 @@ class CameraStream:
             return True
             
         try:
-            # Try to open camera with DirectShow backend (Windows)
-            self.cap = cv2.VideoCapture(self.camera_id, cv2.CAP_DSHOW)
-            if not self.cap.isOpened():
-                # Fallback to default backend
-                self.cap = cv2.VideoCapture(self.camera_id)
-            
-            if not self.cap.isOpened():
-                print(f"[CameraStream] Failed to open camera {self.camera_id}")
+            if not self._open_capture():
+                print(f"[CameraStream] Failed to open camera {self.name} ({self.source})")
                 return False
-            
-            # Set camera properties
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize latency
             
             # Start capture thread
             self.running = True
@@ -65,9 +83,9 @@ class CameraStream:
             try:
                 if not self.cap or not self.cap.isOpened():
                     print(f"[CameraStream] {self.name} disconnected, attempting reconnect...")
-                    self.cap = cv2.VideoCapture(self.camera_id, cv2.CAP_DSHOW)
-                    time.sleep(1)
-                    continue
+                    if not self._open_capture():
+                        time.sleep(1)
+                        continue
                 
                 ret, frame = self.cap.read()
                 
@@ -118,13 +136,14 @@ class CameraManager:
         self.cameras: Dict[int, CameraStream] = {}
         self.initialized = False
     
-    def add_camera(self, camera_id: int, name: str, width: int = 640, height: int = 480) -> bool:
+    def add_camera(self, camera_id: int, name: str, width: int = 640, height: int = 480,
+                   source: Optional[Union[int, str]] = None) -> bool:
         """Add a camera to the manager"""
         if camera_id in self.cameras:
             print(f"[CameraManager] Camera {camera_id} already exists")
             return True
         
-        camera = CameraStream(camera_id, name, width, height)
+        camera = CameraStream(camera_id, name, width, height, source=source)
         if camera.start():
             self.cameras[camera_id] = camera
             return True
@@ -154,15 +173,51 @@ class CameraManager:
             return True
         
         success = True
-        if not self.add_camera(0, "Main Camera"):
+        if not self.add_camera(0, "Main Camera", source=0):
             print("[CameraManager] Warning: Main camera (0) not available")
             success = False
         
-        if not self.add_camera(1, "External Camera"):
+        if not self.add_camera(1, "External Camera", source=1):
             print("[CameraManager] Warning: External camera (1) not available")
             # Don't set success to False - one camera is okay
         
         self.initialized = True
+        return success
+
+    def initialize_from_sources(self, source_config: str) -> bool:
+        """Initialize cameras from a comma-separated config string.
+
+        Format examples:
+            "lobby=0,gate=1"
+            "gate=rtsp://10.0.0.5:554/stream"
+            "0,1" (falls back to numeric indexes)
+        """
+        if not source_config:
+            return self.initialize_default_cameras()
+        
+        # Reset current cameras before reloading configuration
+        self.stop_all()
+        success = False
+        entries = [chunk.strip() for chunk in source_config.split(',') if chunk.strip()]
+        for idx, entry in enumerate(entries):
+            name = f"Camera {idx}"
+            raw_source = entry
+            if '=' in entry:
+                label, value = entry.split('=', 1)
+                if label.strip():
+                    name = label.strip()
+                raw_source = value.strip()
+            
+            source: Union[int, str]
+            if raw_source.isdigit():
+                source = int(raw_source)
+            else:
+                source = raw_source
+            
+            if self.add_camera(idx, name, source=source):
+                success = True
+        
+        self.initialized = success
         return success
 
 
