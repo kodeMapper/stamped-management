@@ -18,9 +18,22 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 # Import our custom modules
 from utils.camera_manager import camera_manager
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {'1', 'true', 'yes', 'y', 'on'}
+
+
+# LIGHT_MODE skips importing heavy ML dependencies (torch/ultralytics/facenet)
+LIGHT_MODE = _env_flag('LIGHT_MODE', False)
+
 from models.crowd_detection import CrowdDetector
-from models.face_recognition_module import FaceRecognizer
-from models.weapon_detection import WeaponDetector
+if not LIGHT_MODE:
+    from models.face_recognition_module import FaceRecognizer
+    from models.weapon_detection import WeaponDetector
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -63,7 +76,10 @@ def load_user(user_id):
     return None
 
 # Initialize detection models
-print("[App] Initializing detection models...")
+if LIGHT_MODE:
+    print("[App] LIGHT_MODE enabled: skipping face/weapon model imports and initialization")
+else:
+    print("[App] Initializing detection models...")
 crowd_detector = CrowdDetector(
     scale_factor=1.3,
     min_neighbors=10,
@@ -71,20 +87,22 @@ crowd_detector = CrowdDetector(
     smoothing_window=5
 )
 
-face_recognizer = FaceRecognizer(match_threshold=0.65)
-
-weapon_detector = WeaponDetector(
-    model_path="yolov8n.pt",
-    confidence_threshold=0.25,
-    target_classes=['knife', 'gun']
-)
+face_recognizer = None
+weapon_detector = None
+if not LIGHT_MODE:
+    face_recognizer = FaceRecognizer(match_threshold=0.65)
+    weapon_detector = WeaponDetector(
+        model_path="yolov8n.pt",
+        confidence_threshold=0.25,
+        target_classes=['knife', 'gun']
+    )
 
 # Global settings
 settings = {
     "crowd_threshold": 8,
     "enable_crowd_detection": True,
-    "enable_face_recognition": True,
-    "enable_weapon_detection": True,
+    "enable_face_recognition": False if LIGHT_MODE else True,
+    "enable_weapon_detection": False if LIGHT_MODE else True,
     "show_overlays": True
 }
 
@@ -141,12 +159,15 @@ def process_frame(camera_id: int, detection_type: str) -> np.ndarray:
             if settings['show_overlays']:
                 processed_frame = crowd_detector.add_overlay(processed_frame, count, settings['crowd_threshold'])
         
-        elif detection_type == 'face' and settings['enable_face_recognition']:
+        elif detection_type == 'face' and settings['enable_face_recognition'] and face_recognizer is not None:
             processed_frame, match_found, num_faces = face_recognizer.detect_and_match(processed_frame)
             if settings['show_overlays']:
                 processed_frame = face_recognizer.add_overlay(processed_frame, match_found, num_faces)
+        elif detection_type == 'face' and (LIGHT_MODE or face_recognizer is None):
+            cv2.putText(processed_frame, "Face recognition disabled (LIGHT_MODE)",
+                        (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
         
-        elif detection_type == 'weapon' and settings['enable_weapon_detection']:
+        elif detection_type == 'weapon' and settings['enable_weapon_detection'] and weapon_detector is not None:
             try:
                 processed_frame, weapon_detected, detections = weapon_detector.detect_weapons(processed_frame, camera_id)
                 if settings['show_overlays']:
@@ -155,6 +176,9 @@ def process_frame(camera_id: int, detection_type: str) -> np.ndarray:
                 print(f"[App] Error in weapon detection: {e}")
                 # Return original frame if detection fails, so feed doesn't break
                 pass
+        elif detection_type == 'weapon' and (LIGHT_MODE or weapon_detector is None):
+            cv2.putText(processed_frame, "Weapon detection disabled (LIGHT_MODE)",
+                        (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
         
         elif detection_type == 'all':
             # Apply all detections (lightweight overlay mode)
@@ -165,14 +189,18 @@ def process_frame(camera_id: int, detection_type: str) -> np.ndarray:
                 temp_frame, count, _ = crowd_detector.detect_faces(temp_frame, camera_id)
             
             # Face recognition
-            if settings['enable_face_recognition']:
+            if settings['enable_face_recognition'] and face_recognizer is not None:
                 temp_frame, match_found, num_faces = face_recognizer.detect_and_match(temp_frame)
             
             # Weapon detection
-            if settings['enable_weapon_detection']:
+            if settings['enable_weapon_detection'] and weapon_detector is not None:
                 temp_frame, weapon_detected, detections = weapon_detector.detect_weapons(temp_frame, camera_id)
                 if weapon_detected and settings['show_overlays']:
                     temp_frame = weapon_detector.add_overlay(temp_frame, weapon_detected, detections)
+
+            if LIGHT_MODE:
+                cv2.putText(temp_frame, "LIGHT_MODE: ML modules disabled",
+                            (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
             
             processed_frame = temp_frame
         
@@ -251,6 +279,8 @@ def video_feed(camera_id, detection_type):
 def upload_face():
     """Upload reference face for recognition"""
     try:
+        if LIGHT_MODE or face_recognizer is None:
+            return jsonify({'success': False, 'message': 'Face recognition is disabled in LIGHT_MODE'}), 503
         if 'face_image' not in request.files:
             return jsonify({'success': False, 'message': 'No file uploaded'})
         
@@ -282,6 +312,8 @@ def upload_face():
 def clear_face():
     """Clear reference face"""
     try:
+        if LIGHT_MODE or face_recognizer is None:
+            return jsonify({'success': False, 'message': 'Face recognition is disabled in LIGHT_MODE'}), 503
         face_recognizer.clear_reference()
         return jsonify({'success': True, 'message': 'Reference face cleared'})
     except Exception as e:
@@ -296,6 +328,10 @@ def status():
         'crowd': {},
         'face': {},
         'weapon': {}
+    }
+
+    status_data['mode'] = {
+        'light_mode': bool(LIGHT_MODE)
     }
     
     active_camera_ids = list(camera_manager.cameras.keys()) or [0, 1]
@@ -320,15 +356,29 @@ def status():
         }
     
     # Face recognition status
-    status_data['face'] = {
-        'has_reference': face_recognizer.has_reference(),
-        'reference_name': face_recognizer.reference_name
-    }
+    if face_recognizer is None:
+        status_data['face'] = {
+            'enabled': False,
+            'reason': 'LIGHT_MODE' if LIGHT_MODE else 'unavailable'
+        }
+    else:
+        status_data['face'] = {
+            'enabled': True,
+            'has_reference': face_recognizer.has_reference(),
+            'reference_name': face_recognizer.reference_name
+        }
     
     # Weapon detection status
-    status_data['weapon'] = {
-        'model_loaded': weapon_detector.is_loaded()
-    }
+    if weapon_detector is None:
+        status_data['weapon'] = {
+            'enabled': False,
+            'reason': 'LIGHT_MODE' if LIGHT_MODE else 'unavailable'
+        }
+    else:
+        status_data['weapon'] = {
+            'enabled': True,
+            'model_loaded': weapon_detector.is_loaded()
+        }
     
     return jsonify(status_data)
 
@@ -348,10 +398,16 @@ def update_settings():
                 settings['enable_crowd_detection'] = bool(data['enable_crowd_detection'])
             
             if 'enable_face_recognition' in data:
-                settings['enable_face_recognition'] = bool(data['enable_face_recognition'])
+                if LIGHT_MODE:
+                    settings['enable_face_recognition'] = False
+                else:
+                    settings['enable_face_recognition'] = bool(data['enable_face_recognition'])
             
             if 'enable_weapon_detection' in data:
-                settings['enable_weapon_detection'] = bool(data['enable_weapon_detection'])
+                if LIGHT_MODE:
+                    settings['enable_weapon_detection'] = False
+                else:
+                    settings['enable_weapon_detection'] = bool(data['enable_weapon_detection'])
             
             if 'show_overlays' in data:
                 settings['show_overlays'] = bool(data['show_overlays'])
