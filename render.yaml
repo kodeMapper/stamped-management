@@ -5,10 +5,12 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    startCommand: gunicorn -b 0.0.0.0:$PORT --workers ${WEB_CONCURRENCY:-1} --threads 2 --timeout 120 app:app
     envVars:
       - key: FLASK_SECRET_KEY
         sync: false
+      - key: WEB_CONCURRENCY
+        value: "1"
       - key: ADMIN_USERNAME
         value: admin
       - key: ADMIN_PASSWORD
